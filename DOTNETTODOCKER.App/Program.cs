@@ -5,25 +5,30 @@ using System.Linq;
 
 namespace DOTNETTODOCKER.App
 {
+    using DOTNETTODOCKER.App.Extensions;
+
     internal class Program
     {
         static void Main()
         {
             try
             {
-                var csProjFilePath = ObterString("Digite o caminho do csproj: ");
+                var slnFilePath = ObterString("Digite o caminho do .sln: ");
 
-                if (!File.Exists(csProjFilePath))
-                    throw new FileNotFoundException($"Arquivo não encontrado em '{csProjFilePath}'.");
+                if (!File.Exists(slnFilePath))
+                    throw new FileNotFoundException($"Arquivo não encontrado em '{slnFilePath}'.");
 
-                var linhas = File.ReadAllText(csProjFilePath);
+                if (!slnFilePath.EndsWith(".sln"))
+                    throw new Exception();
+
+                var linhas = File.ReadAllText(slnFilePath);
 
                 var linhasCsProj = linhas.Split('\n')
                     .Where((l) => l.Contains(".csproj") && !l.ToLower().Contains("test"))
                     .Select((l) => l.Split(',').FirstOrDefault((a) => a.Contains(".csproj")).Replace("\"", string.Empty).Trim())
                     .ToList();
 
-                var dockeFilePath = csProjFilePath.Replace($"\\{csProjFilePath.Split('\\')[^1]}", string.Empty);
+                var dockeFilePath = slnFilePath.Replace($"\\{slnFilePath.Split('\\')[^1]}", string.Empty);
 
                 var programFilePath = Directory.GetFiles(dockeFilePath, "Program.cs", SearchOption.AllDirectories);
 
@@ -87,6 +92,29 @@ namespace DOTNETTODOCKER.App
 
                 #region docker-compose
 
+                string portaDocker;
+
+                if (File.Exists(dockeFilePath + "\\docker-compose.yml"))
+                {
+                    var portaDockerOld = File.ReadAllText(dockeFilePath + "\\docker-compose.yml")
+                        .Split('\n')
+                        .Where((l) => l.Contains(":80"))
+                        .Select((l) => l.Split(':').FirstOrDefault().Replace("-", string.Empty).Trim())
+                        .FirstOrDefault();
+
+                    portaDocker = ObterString($"Digite a porta a ser utilizada ({portaDockerOld}): ", true);
+
+                    if (string.IsNullOrWhiteSpace(portaDocker))
+                        portaDocker = portaDockerOld;
+                }
+                else
+                {
+                    portaDocker = ObterString($"Digite a porta a ser utilizada (5000 - 5999): ");
+                }
+
+                if (portaDocker.ToInteger() < 5000 || portaDocker.ToInteger() > 5999)
+                    throw new ArgumentOutOfRangeException("Porta", portaDocker, "Porta tem que estar entre 5000 - 5999");
+
                 var streamWriterDockerCompose = new StreamWriter(dockeFilePath + "\\docker-compose.yml", false);
 
                 streamWriterDockerCompose.WriteLine("version: '3.4'");
@@ -98,7 +126,7 @@ namespace DOTNETTODOCKER.App
                 streamWriterDockerCompose.WriteLine("        image: ${DOCKER_REGISTRY-}" + projetoPrincipalNome.ToLower().Replace(".", string.Empty));
                 streamWriterDockerCompose.WriteLine("        restart: always");
                 streamWriterDockerCompose.WriteLine("        ports:");
-                streamWriterDockerCompose.WriteLine("            - 5031:80");
+                streamWriterDockerCompose.WriteLine($"            - {portaDocker}:80");
                 streamWriterDockerCompose.WriteLine("        build:");
                 streamWriterDockerCompose.WriteLine("            context: .");
                 streamWriterDockerCompose.WriteLine("            dockerfile: Dockerfile");
@@ -113,12 +141,14 @@ namespace DOTNETTODOCKER.App
                 var streamWriterDockerIgnore = new StreamWriter(dockeFilePath + "\\.dockerignore.yml", false);
 
                 foreach (var item in ListaIgnore)
-                {
                     streamWriterDockerIgnore.WriteLine(item);
-                }
 
                 streamWriterDockerIgnore.Close();
                 streamWriterDockerIgnore.Dispose();
+
+                ImprimirNoConsole("\nDigite o comando seguinte comando na pasta raíz do solução do seu projeto:");
+                ImprimirNoConsole("\tdocker-compose up -d --build");
+                ImprimirNoConsole($"\tAcesse: https://localhost:{portaDocker}");
 
                 #endregion
             }
@@ -129,16 +159,16 @@ namespace DOTNETTODOCKER.App
                 if (ex.InnerException != null)
                     msgErro += $"\n\nDetalhes do erro: '{ex.InnerException.Message.ToUpper()}'.";
 
-                Escrever(msgErro);
+                ImprimirNoConsole(msgErro);
             }
             finally
             {
-                Escrever("\nAperte qualquer tecla para sair.");
+                ImprimirNoConsole("\nAperte qualquer tecla para sair.");
                 Console.ReadKey();
             }
         }
 
-        static void Escrever(string msg, bool ask = false)
+        static void ImprimirNoConsole(string msg, bool ask = false)
         {
             if (ask)
                 Console.Write(msg);
@@ -146,16 +176,19 @@ namespace DOTNETTODOCKER.App
                 Console.WriteLine(msg);
         }
 
-        private static string ObterString(string msg)
+        private static string ObterString(string msg, bool allowEmptyString = false)
         {
-            Escrever(msg, true);
+            ImprimirNoConsole(msg, true);
 
             var retorno = Console.ReadLine();
 
-            while (string.IsNullOrWhiteSpace(retorno))
+            if (!allowEmptyString)
             {
-                Escrever(msg, true);
-                retorno = Console.ReadLine();
+                while (string.IsNullOrWhiteSpace(retorno))
+                {
+                    ImprimirNoConsole(msg, true);
+                    retorno = Console.ReadLine();
+                }
             }
 
             return retorno;
